@@ -1,8 +1,10 @@
 ---
 title: "Splines In Stan"
 author: "Milad Kharratzadeh"
-date: "`r format(Sys.time(), '%d %B, %Y')`"
-output: pdf_document
+date: '`r format(Sys.time(), ''%d %B, %Y'')`'
+output:
+  html_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -314,29 +316,102 @@ spline_model<-stan_model("b_spline.stan")
 spline_penalized_model<-stan_model("b_spline_penalized.stan")
 fit_spline<-sampling(spline_model,iter=500,control = list(adapt_delta=0.95))
 fit_spline_penalized<-sampling(spline_penalized_model,iter=500,control = list(adapt_delta=0.95))
+gp_model <- stan_model('gp.stan')
+fit_gp <- sampling(
+	object = gp_model
+	, data = list(
+		  n = length(Y)
+		, y = scale(Y)[,1] #mean=0,sd=1
+		, x = (X-min(X))/(max(X)-min(X)) #range 0-1
+	)
+	, iter = 200
+)
 ```
 
 ```{r plot_res, echo=FALSE, comment=NA, message=NA, fig.height=6}
-ff<-extract(fit_spline)
-Y_hat_med <- array(NA, length(Y))
-Y_hat_ub <- array(NA, length(Y))
-Y_hat_lb <- array(NA, length(Y))
-for (i in 1:length(Y)) {
-  Y_hat_med[i] <- median(ff$Y_hat[,i]);
-  Y_hat_lb[i] <- quantile(ff$Y_hat[,i],probs = 0.25)
-  Y_hat_ub[i] <- quantile(ff$Y_hat[,i],probs = 0.75)
-}
-ff<-extract(fit_spline_penalized)
-Y_hat_med_pen <- array(NA, length(Y))
-Y_hat_ub_pen <- array(NA, length(Y))
-Y_hat_lb_pen <- array(NA, length(Y))
-for (i in 1:length(Y)) {
-  Y_hat_med_pen[i] <- median(ff$Y_hat[,i]);
-  Y_hat_lb_pen[i] <- quantile(ff$Y_hat[,i],probs = 0.25)
-  Y_hat_ub_pen[i] <- quantile(ff$Y_hat[,i],probs = 0.75)
-}
-plot(X,Y, col="azure4")
-lines(X, Y_hat_med, col="Red", lw=2, lty=1)
-lines(X, Y_hat_med_pen, col="blue",lw=2, lty=1)
-legend(-1,-2,0,legend=c("fit without smoothing prior", "fit with smoothing prior"), col=c("red", "blue"), lw=4, box.lty=0, lty=1, border="white")
+library(tidyverse)
+
+spline1<-as_tibble(rstan::extract(fit_spline,par='Y_hat')[[1]])
+spline2<-as_tibble(rstan::extract(fit_spline_penalized,par='Y_hat')[[1]])
+gp<-as_tibble(rstan::extract(fit_gp,par='f')[[1]]*sd(Y)+mean(Y))
+spline1$method = 'spline'
+spline2$method = 'penalized spline'
+gp$method = 'GP'
+
+dplyr::bind_rows(spline1,spline2,gp) %>% 
+	tidyr::gather(
+		key = 'key'
+		, value = 'value'
+		, -method
+	) %>% 
+	dplyr::mutate(
+		x = X[as.numeric(gsub('V','',key))]
+	) %>%
+	dplyr::group_by(
+		method
+		, x
+	) %>% 
+	dplyr::summarise(
+		med = median(value)
+		, lo = quantile(value,.25)
+		, hi = quantile(value,.75)
+		, diff_med = median(value-Y_true[X==x[1]])
+		, diff_lo = quantile(value-Y_true[X==x[1]],.25)
+		, diff_hi = quantile(value-Y_true[X==x[1]],.75)
+	) ->
+	fit_stats
+
+ggplot() +
+	geom_point(
+		data = data.frame(x=X,y=Y)
+		, mapping = aes(x=x,y=y)
+		, alpha = .5
+	) +
+	geom_line(
+		data = fit_stats
+		, mapping = aes(x=x,y=med,colour=method)
+	)
+
+ggplot() +
+	geom_point(
+		data = data.frame(x=X,y=Y)
+		, mapping = aes(x=x,y=y)
+		, alpha = .5
+	) +
+	geom_ribbon(
+		data = fit_stats
+		, mapping = aes(x=x,ymin=lo,ymax=hi,fill=method)
+		, alpha = .5
+		, colour='transparent'
+	)
+
+ggplot() +
+	geom_point(
+		data = data.frame(x=X,y=Y-Y_true)
+		, mapping = aes(x=x,y=y)
+		, alpha = .5
+	) +
+	geom_hline(yintercept=0) +
+	geom_line(
+		data = fit_stats
+		, mapping = aes(x=x,y=diff_med,colour=method)
+		, alpha = .5
+	) +
+	geom_ribbon(
+		data = fit_stats
+		, mapping = aes(x=x,ymin=diff_lo,ymax=diff_hi,fill=method)
+		, alpha = .5
+		, colour='transparent'
+	) +
+	labs(
+		y = 'Deviation from True'
+	) +
+	facet_grid(method~.)
+	
+fit_stats %>% 
+	dplyr::group_by(method) %>% 
+	dplyr::summarise(
+		p_true_outside_cr50 = mean((diff_lo>0)|(diff_hi<0))
+	)
+	
 ```
