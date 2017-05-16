@@ -3,3 +3,5 @@
 .RData
 .Ruserdata
 .rds
+splines_in_stan_cache
+splines_in_stan_files
