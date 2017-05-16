@@ -1,5 +1,5 @@
 functions{
-	# GP: computes noiseless Gaussian Process given pre-computed unique distances
+	# GP: computes noiseless Gaussian Process
 	vector GP(real volatility, real amplitude, vector normal01, int n, real[] x ) {
 
 		# cov_mat: covariance matrix
