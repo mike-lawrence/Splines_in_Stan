@@ -2,6 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
-.rds
+*.rds
 splines_in_stan_cache
 splines_in_stan_files
